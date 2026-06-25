@@ -1,0 +1,101 @@
+#include <WiFi.h> // Ganti dengan <WiFi.h> jika Anda menggunakan ESP32
+#include <HTTPClient.h> // Ganti dengan <HTTPClient.h> jika menggunakan ESP32
+#include <WiFiClient.h>
+#include <DHT.h>
+
+// Konfigurasi Wi-Fi
+const char* ssid     = "UNTIRTA";
+const char* password = "untirtajawara";
+
+// Alamat URL API Laravel (Sesuaikan IP Laptop Anda dan Port-nya)
+// Contoh: "http://119.168.1.5:8000/api/sensor-send"
+const char* serverUrl = "http://10.17.158.210:8000/api/sensor-send";
+
+// Konfigurasi Sensor DHT22
+#define DHTPIN 4          // Pin Data DHT22 terhubung ke D2 (GPIO4)
+#define DHTTYPE DHT22      // Mendefinisikan tipe sensor DHT 22
+DHT dht(DHTPIN, DHTTYPE);
+
+// Konfigurasi Sensor LDR
+#define LDRPIN 34          // Pin Analog LDR terhubung ke A0
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  // Proses menyambungkan ke Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.print("Menghubungkan ke Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nTerhubung ke Wi-Fi!");
+  Serial.print("IP ESP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  // Cek koneksi Wi-Fi sebelum mengirim data
+  if (WiFi.status() == WL_CONNECTED) {
+    
+    // 1. Membaca data dari sensor DHT22
+    float humidity = dht.readHumidity();
+    float temperature = dht.readTemperature();
+
+    // 2. Membaca data dari sensor LDR (Nilai analog 0 - 1023)
+    int ldrValue = analogRead(LDRPIN);
+    int lightValue = 4095 - ldrValue;
+
+    // Validasi apakah pembacaan sensor DHT berhasil
+    if (isnan(humidity) || isnan(temperature)) {
+      Serial.println("Gagal membaca dari sensor DHT22!");
+      delay(2000);
+      return;
+    }
+
+    // Tampilkan log pembacaan di Serial Monitor
+    Serial.print("Suhu: "); Serial.print(temperature); Serial.print(" °C | ");
+    Serial.print("Kelembaban: "); Serial.print(humidity); Serial.print(" % | ");
+    Serial.print("LDR: "); Serial.println(lightValue);
+
+    // 3. Mengirim data ke Laravel menggunakan HTTP POST
+    WiFiClient client;
+    HTTPClient http;
+
+    http.begin(client, serverUrl);
+    
+    // Set Header untuk mengirim data dalam bentuk JSON atau URL-Encoded
+    // Kita gunakan application/x-www-form-urlencoded agar mudah dibaca oleh $request->validate() Laravel
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    // Susun data string POST body
+    String httpRequestData = "temperature=" + String(temperature) +
+                             "&humidity=" + String(humidity) +
+                             "&lux=" + String(lightValue); // lux diisi data mentah LDR dulu untuk pengujian
+
+    // Kirim request POST
+    int httpResponseCode = http.POST(httpRequestData);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+      Serial.print("Response server: ");
+      Serial.println(response);
+    } else {
+      Serial.print("Eror saat mengirim POST: ");
+      Serial.println(httpResponseCode);
+    }
+
+    // Menutup koneksi HTTP
+    http.end();
+
+  } else {
+    Serial.println("Wi-Fi Terputus, mencoba menghubungkan kembali...");
+    WiFi.begin(ssid, password);
+  }
+
+  // Jeda pengiriman data setiap 5 detik (bisa disesuaikan dengan kebutuhan)
+  delay(5000);
+}
